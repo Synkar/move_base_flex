@@ -83,8 +83,13 @@ uint32_t CostmapControllerExecution::computeVelocityCmd(
   // Lock the costmap while planning, but following issue #4, we allow to move the responsibility to the planner itself
   if (lock_costmap_)
   {
+    ROS_DEBUG("CostmapControllerExecution::computeVelocityCmd:locking %s ", costmap_ptr_->getName().c_str());
     boost::lock_guard<costmap_2d::Costmap2D::mutex_t> lock(*(costmap_ptr_->getCostmap()->getMutex()));
-    return controller_->computeVelocityCommands(robot_pose, robot_velocity, vel_cmd, message);
+    ROS_DEBUG("CostmapControllerExecution::computeVelocityCmd: locked %s ", costmap_ptr_->getName().c_str());
+    uint32_t result = controller_->computeVelocityCommands(robot_pose, robot_velocity, vel_cmd, message);
+    ROS_DEBUG("CostmapControllerExecution::computeVelocityCmd: unlocked %s ", costmap_ptr_->getName().c_str());
+
+    return result;
   }
   return controller_->computeVelocityCommands(robot_pose, robot_velocity, vel_cmd, message);
 }

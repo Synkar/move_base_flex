@@ -88,9 +88,14 @@ void CostmapWrapper::reconfigure(double shutdown_costmap, double shutdown_costma
 
 void CostmapWrapper::clear()
 {
+  ROS_DEBUG("Trying to get mutex lock for %s", name_.c_str());
   // lock and clear costmap
   boost::unique_lock<costmap_2d::Costmap2D::mutex_t> lock(*getCostmap()->getMutex());
+  ROS_DEBUG("Got mutex lock for %s", name_.c_str());
+
+  ROS_DEBUG("Resetting layers...");
   resetLayers();
+  ROS_DEBUG("Layers reset successfully");
 }
 
 void CostmapWrapper::checkActivate()

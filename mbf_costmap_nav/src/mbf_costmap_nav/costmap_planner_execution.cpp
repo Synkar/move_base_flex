@@ -91,8 +91,13 @@ uint32_t CostmapPlannerExecution::makePlan(const geometry_msgs::PoseStamped &sta
 
   if (lock_costmap_)
   {
+    ROS_DEBUG("CostmapPlannerExecution::makePlan: locking %s ", costmap_ptr_->getName().c_str());
     boost::unique_lock<costmap_2d::Costmap2D::mutex_t> lock(*(costmap_ptr_->getCostmap()->getMutex()));
-    return planner_->makePlan(g_start, g_goal, tolerance, plan, cost, message);
+    ROS_DEBUG("CostmapPlannerExecution::makePlan: locked %s", costmap_ptr_->getName().c_str());
+    uint32_t  result = planner_->makePlan(g_start, g_goal, tolerance, plan, cost, message);
+    ROS_DEBUG("CostmapPlannerExecution::makePlan: unlocked %s", costmap_ptr_->getName().c_str());
+
+    return result;
   }
   return planner_->makePlan(g_start, g_goal, tolerance, plan, cost, message);
 }
