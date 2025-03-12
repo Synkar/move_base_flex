@@ -121,6 +121,8 @@ class MoveBaseAction
     move_base_result.final_pose = robot_pose_;
   }
 
+  mbf_msgs::MoveBaseResult move_base_result_;
+
   mbf_msgs::ExePathGoal exe_path_goal_;
   mbf_msgs::GetPathGoal get_path_goal_;
   mbf_msgs::RecoveryGoal recovery_goal_;
@@ -133,6 +135,9 @@ class MoveBaseAction
 
   //! minimal move distance to not detect an oscillation
   double oscillation_distance_;
+
+  //! minimal rotation to not detect an oscillation
+  double oscillation_angle_;
 
   GoalHandle goal_handle_;
 
@@ -166,6 +171,7 @@ class MoveBaseAction
 
   //! Replanning thread, running permanently
   boost::thread replanning_thread_;
+  bool replanning_thread_shutdown_;
 
   //! true, if recovery behavior for the MoveBase action is enabled.
   bool recovery_enabled_;

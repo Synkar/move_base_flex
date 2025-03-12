@@ -16,6 +16,7 @@
 
     <depend>actionlib</depend>
     <depend>actionlib_msgs</depend>
+    <depend>angles</depend>
     <depend>costmap_2d</depend>
     <depend>dynamic_reconfigure</depend>
     <depend>geometry_msgs</depend>
@@ -34,6 +35,9 @@
     <!-- Required by the backward compatibility move_base relay -->
     <exec_depend>move_base</exec_depend>
     <exec_depend>move_base_msgs</exec_depend>
+
+    <test_depend>gtest</test_depend>
+    <test_depend>map_server</test_depend>
 
     <export>
       <rosdoc config="rosdoc.yaml" />

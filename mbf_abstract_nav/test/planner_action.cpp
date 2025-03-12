@@ -136,7 +136,8 @@ struct PlannerActionFixture : public Test
 
   void callAction(MockedActionServer::GoalHandle goal_handle)
   {
-    planner_action.start(goal_handle, boost::make_shared<AbstractPlannerExecution>("plugin", planner, tf, config));
+    planner_action.start(goal_handle,
+                         boost::make_shared<AbstractPlannerExecution>("plugin", planner, robot_info, config));
   }
 
   void cancelAction(MockedActionServer::GoalHandle goal_handle)
@@ -235,7 +236,7 @@ TEST_F(PlannerActionFixture, noPathFound)
   goal->goal.use_start_pose = true;
   goal->goal.start_pose.header.frame_id = goal->goal.target_pose.header.frame_id = global_frame;
 
-  // set the expectation: the planner retuns a failure
+  // set the expectation: the planner returns a failure
   EXPECT_CALL(*planner, makePlan(_, _, _, _, _, _)).WillOnce(Return(mbf_msgs::GetPathResult::NO_PATH_FOUND));
   EXPECT_CALL(action_server,
               publishResult(_, Field(&mbf_msgs::GetPathResult::outcome, Eq(mbf_msgs::GetPathResult::NO_PATH_FOUND))))
@@ -251,7 +252,7 @@ ACTION(SleepAndFail)
 
 TEST_F(PlannerActionFixture, patExceeded)
 {
-  // test case where the planner fails multple times and we are out of patience
+  // test case where the planner fails multiple times and we are out of patience
 
   // setup the config; this will be passed to the execution
   config.planner_max_retries = 5;
@@ -261,7 +262,7 @@ TEST_F(PlannerActionFixture, patExceeded)
   goal->goal.use_start_pose = true;
   goal->goal.start_pose.header.frame_id = goal->goal.target_pose.header.frame_id = global_frame;
 
-  // set the expectation: the planner retuns a failure
+  // set the expectation: the planner returns a failure
   EXPECT_CALL(*planner, makePlan(_, _, _, _, _, _)).WillRepeatedly(SleepAndFail());
   EXPECT_CALL(action_server,
               publishResult(_, Field(&mbf_msgs::GetPathResult::outcome, Eq(mbf_msgs::GetPathResult::PAT_EXCEEDED))))

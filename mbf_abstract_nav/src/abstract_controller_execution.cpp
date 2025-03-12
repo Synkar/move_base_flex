@@ -48,29 +48,30 @@ namespace mbf_abstract_nav
 const double AbstractControllerExecution::DEFAULT_CONTROLLER_FREQUENCY = 100.0; // 100 Hz
 
 AbstractControllerExecution::AbstractControllerExecution(
-    const std::string &name,
-    const mbf_abstract_core::AbstractController::Ptr &controller_ptr,
-    const ros::Publisher &vel_pub,
-    const ros::Publisher &goal_pub,
-    const TFPtr &tf_listener_ptr,
-    const MoveBaseFlexConfig &config) :
-  AbstractExecutionBase(name),
-    controller_(controller_ptr), tf_listener_ptr(tf_listener_ptr), state_(INITIALIZED),
-    moving_(false), max_retries_(0), patience_(0), vel_pub_(vel_pub), current_goal_pub_(goal_pub),
-    loop_rate_(DEFAULT_CONTROLLER_FREQUENCY)
+    const std::string& name, const mbf_abstract_core::AbstractController::Ptr& controller_ptr,
+    const mbf_utility::RobotInformation& robot_info, const ros::Publisher& vel_pub, const MoveBaseFlexConfig& config)
+  : AbstractExecutionBase(name, robot_info)
+  , controller_(controller_ptr)
+  , state_(INITIALIZED)
+  , moving_(false)
+  , max_retries_(0)
+  , patience_(0)
+  , vel_pub_(vel_pub)
+  , loop_rate_(DEFAULT_CONTROLLER_FREQUENCY)
 {
-  ros::NodeHandle nh;
   ros::NodeHandle private_nh("~");
 
   // non-dynamically reconfigurable parameters
   private_nh.param("robot_frame", robot_frame_, std::string("base_link"));
   private_nh.param("map_frame", global_frame_, std::string("map"));
   private_nh.param("force_stop_at_goal", force_stop_at_goal_, false);
+  private_nh.param("force_stop_on_retry", force_stop_on_retry_, true);
   private_nh.param("force_stop_on_cancel", force_stop_on_cancel_, false);
   private_nh.param("mbf_tolerance_check", mbf_tolerance_check_, false);
   private_nh.param("dist_tolerance", dist_tolerance_, 0.1);
   private_nh.param("angle_tolerance", angle_tolerance_, M_PI / 18.0);
   private_nh.param("tf_timeout", tf_timeout_, 1.0);
+  private_nh.param("cmd_vel_ignored_tolerance", cmd_vel_ignored_tolerance_, 5.0);
 
   // dynamically reconfigurable parameters
   reconfigure(config);
@@ -164,22 +165,6 @@ std::vector<geometry_msgs::PoseStamped> AbstractControllerExecution::getNewPlan(
   return plan_;
 }
 
-
-bool AbstractControllerExecution::computeRobotPose()
-{
-  if (!mbf_utility::getRobotPose(*tf_listener_ptr, robot_frame_, global_frame_,
-                                 ros::Duration(tf_timeout_), robot_pose_))
-  {
-    ROS_ERROR_STREAM("Could not get the robot pose in the global frame. - robot frame: \""
-                         << robot_frame_ << "\"   global frame: \"" << global_frame_);
-    message_ = "Could not get the robot pose";
-    outcome_ = mbf_msgs::ExePathResult::TF_ERROR;
-    return false;
-  }
-  return true;
-}
-
-
 uint32_t AbstractControllerExecution::computeVelocityCmd(const geometry_msgs::PoseStamped &robot_pose,
                                                          const geometry_msgs::TwistStamped &robot_velocity,
                                                          geometry_msgs::TwistStamped &vel_cmd,
@@ -198,6 +183,53 @@ void AbstractControllerExecution::setVelocityCmd(const geometry_msgs::TwistStamp
   // TODO what happen with frame id?
   // TODO Add a queue here for handling the outcome, message and cmd_vel values bundled,
   // TODO so there should be no loss of information in the feedback stream
+}
+
+bool AbstractControllerExecution::checkCmdVelIgnored(const geometry_msgs::Twist& cmd_vel)
+{
+  // check if the velocity ignored check is enabled or not
+  if (cmd_vel_ignored_tolerance_ <= 0.0)
+  { 
+    return false;
+  }
+
+  const bool robot_stopped = robot_info_.isRobotStopped(1e-3, 1e-3);
+
+  // compute linear and angular velocity magnitude
+  const double cmd_linear = std::hypot(cmd_vel.linear.x, cmd_vel.linear.y);
+  const double cmd_angular = std::abs(cmd_vel.angular.z);
+
+  const bool cmd_is_zero = cmd_linear < 1e-3 && cmd_angular < 1e-3;
+
+  if (!robot_stopped || cmd_is_zero)
+  {
+    // velocity is not being ignored
+    first_ignored_time_ = ros::Time();
+    return false;
+  }
+
+  if (first_ignored_time_.is_zero())
+  {
+    // set first_ignored_time_ to now if it was zero
+    first_ignored_time_ = ros::Time::now();
+  }
+
+  const double ignored_duration = (ros::Time::now() - first_ignored_time_).toSec();
+
+  if (ignored_duration > cmd_vel_ignored_tolerance_)
+  {
+    ROS_ERROR("Robot is ignoring velocity commands for more than %.2f seconds. Tolerance exceeded!",
+              cmd_vel_ignored_tolerance_);
+    return true;
+  }
+  else if (ignored_duration > 1.0)
+  {
+    ROS_WARN_THROTTLE(1,
+                      "Robot is ignoring velocity commands for %.2f seconds (last command: vx=%.2f, vy=%.2f, w=%.2f)",
+                      ignored_duration, cmd_vel.linear.x, cmd_vel.linear.y, cmd_vel.angular.z);
+  }
+
+  return false;
 }
 
 geometry_msgs::TwistStamped AbstractControllerExecution::getVelocityCmd() const
@@ -293,6 +325,7 @@ void AbstractControllerExecution::run()
   last_valid_cmd_time_ = ros::Time();
   int retries = 0;
   int seq = 0;
+  first_ignored_time_ = ros::Time();
 
   try
   {
@@ -314,8 +347,9 @@ void AbstractControllerExecution::run()
       {
         // the specific implementation must have detected a risk situation; at this abstract level, we
         // cannot tell what the problem is, but anyway we command the robot to stop to avoid crashes
-        publishZeroVelocity();   // note that we still feedback command calculated by the plugin
+        publishZeroVelocity();
         loop_rate_.sleep();
+        continue;
       }
 
       // update plan dynamically
@@ -340,12 +374,13 @@ void AbstractControllerExecution::run()
           condition_.notify_all();
           return;
         }
-        current_goal_pub_.publish(plan.back());
       }
 
       // compute robot pose and store it in robot_pose_
-      if (!computeRobotPose())
+      if (!robot_info_.getRobotPose(robot_pose_))
       {
+        message_ = "Could not get the robot pose";
+        outcome_ = mbf_msgs::ExePathResult::TF_ERROR;
         publishZeroVelocity();
         setState(INTERNAL_ERROR);
         moving_ = false;
@@ -378,7 +413,8 @@ void AbstractControllerExecution::run()
 
         // call plugin to compute the next velocity command
         geometry_msgs::TwistStamped cmd_vel_stamped;
-        geometry_msgs::TwistStamped robot_velocity;   // TODO pass current velocity to the plugin!
+        geometry_msgs::TwistStamped robot_velocity;
+        robot_info_.getRobotVelocity(robot_velocity);
         outcome_ = computeVelocityCmd(robot_pose_, robot_velocity, cmd_vel_stamped, message_ = "");
 
         if (outcome_ < 10)
@@ -387,6 +423,12 @@ void AbstractControllerExecution::run()
           vel_pub_.publish(cmd_vel_stamped.twist);
           last_valid_cmd_time_ = ros::Time::now();
           retries = 0;
+          // check if robot is ignoring velocity command
+          if (checkCmdVelIgnored(cmd_vel_stamped.twist))
+          {
+            setState(ROBOT_DISABLED);
+            moving_ = false;
+          }
         }
         else if (outcome_ == mbf_msgs::ExePathResult::CANCELED)
         {
@@ -411,11 +453,21 @@ void AbstractControllerExecution::run()
           else
           {
             setState(NO_LOCAL_CMD); // useful for server feedback
-            // we keep on moving if we have retries left or if the user has granted us some patience.
-            moving_ = max_retries_ || !patience_.isZero();
+            // keep trying if we have > 0 or -1 (infinite) retries
+            moving_ = max_retries_;
           }
-          // could not compute a valid velocity command -> stop moving the robot
-          publishZeroVelocity(); // command the robot to stop; we still feedback command calculated by the plugin
+
+          // could not compute a valid velocity command
+          if (!moving_ || force_stop_on_retry_)
+          {
+            publishZeroVelocity(); // command the robot to stop; we still feedback command calculated by the plugin
+          }
+          else
+          {
+            // we are retrying compute velocity commands; we keep sending the command calculated by the plugin
+            // with the expectation that it's a sensible one (e.g. slow down while respecting acceleration limits)
+            vel_pub_.publish(cmd_vel_stamped.twist);
+          }
         }
 
         // set stamped values; timestamp and frame_id should be set by the plugin; otherwise setVelocityCmd will do

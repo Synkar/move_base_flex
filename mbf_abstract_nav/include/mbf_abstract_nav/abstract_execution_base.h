@@ -41,6 +41,8 @@
 
 #include <boost/thread.hpp>
 
+#include <mbf_utility/robot_information.h>
+
 #include <mbf_abstract_nav/MoveBaseFlexConfig.h>
 
 #include <string>
@@ -57,7 +59,7 @@ namespace mbf_abstract_nav
 class AbstractExecutionBase
 {
  public:
-   AbstractExecutionBase(const std::string& name);
+   AbstractExecutionBase(const std::string& name, const mbf_utility::RobotInformation& robot_info);
 
    virtual ~AbstractExecutionBase();
 
@@ -104,7 +106,7 @@ class AbstractExecutionBase
    virtual void postRun(){};
 
    /**
-    * @brief Optional implementaiton-specific configuration function.
+    * @brief Optional implementation-specific configuration function.
     */
    virtual void reconfigure(MoveBaseFlexConfig& _cfg)
    {
@@ -130,6 +132,9 @@ protected:
 
   //! the plugin name; not the plugin type!
   std::string name_;
+
+  //! Reference to the current robot state
+  const mbf_utility::RobotInformation& robot_info_;
 };
 
 } /* namespace mbf_abstract_nav */

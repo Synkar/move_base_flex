@@ -50,7 +50,6 @@
 
 #include <mbf_utility/navigation_utility.h>
 #include <mbf_abstract_core/abstract_controller.h>
-#include <mbf_utility/types.h>
 
 #include "mbf_abstract_nav/MoveBaseFlexConfig.h"
 #include "mbf_abstract_nav/abstract_execution_base.h"
@@ -82,16 +81,17 @@ namespace mbf_abstract_nav
 
     /**
      * @brief Constructor
-     * @param condition Thread sleep condition variable, to wake up connected threads
-     * @param controller_plugin_type The plugin type associated with the plugin to load
-     * @param tf_listener_ptr Shared pointer to a common tf listener
+     * @param name Name of this execution
+     * @param controller_ptr Pointer to the controller plugin
+     * @param robot_info Current robot state
+     * @param vel_pub Velocity publisher
+     * @param config Initial configuration for this execution
      */
     AbstractControllerExecution(
         const std::string &name,
         const mbf_abstract_core::AbstractController::Ptr &controller_ptr,
+        const mbf_utility::RobotInformation &robot_info,
         const ros::Publisher &vel_pub,
-        const ros::Publisher &goal_pub,
-        const TFPtr &tf_listener_ptr,
         const MoveBaseFlexConfig &config);
 
     /**
@@ -133,20 +133,21 @@ namespace mbf_abstract_nav
      */
     enum ControllerState
     {
-      INITIALIZED,  ///< Controller has been initialized successfully.
-      STARTED,      ///< Controller has been started.
-      PLANNING,     ///< Executing the plugin.
-      NO_PLAN,      ///< The controller has been started without a plan.
-      MAX_RETRIES,  ///< Exceeded the maximum number of retries without a valid command.
-      PAT_EXCEEDED, ///< Exceeded the patience time without a valid command.
-      EMPTY_PLAN,   ///< Received an empty plan.
-      INVALID_PLAN, ///< Received an invalid plan that the controller plugin rejected.
-      NO_LOCAL_CMD, ///< Received no velocity command by the plugin, in the current cycle.
-      GOT_LOCAL_CMD,///< Got a valid velocity command from the plugin.
-      ARRIVED_GOAL, ///< The robot arrived the goal.
-      CANCELED,     ///< The controller has been canceled.
-      STOPPED,      ///< The controller has been stopped!
-      INTERNAL_ERROR///< An internal error occurred.
+      INITIALIZED,     ///< Controller has been initialized successfully.
+      STARTED,         ///< Controller has been started.
+      PLANNING,        ///< Executing the plugin.
+      NO_PLAN,         ///< The controller has been started without a plan.
+      MAX_RETRIES,     ///< Exceeded the maximum number of retries without a valid command.
+      PAT_EXCEEDED,    ///< Exceeded the patience time without a valid command.
+      EMPTY_PLAN,      ///< Received an empty plan.
+      INVALID_PLAN,    ///< Received an invalid plan that the controller plugin rejected.
+      NO_LOCAL_CMD,    ///< Received no velocity command by the plugin, in the current cycle.
+      GOT_LOCAL_CMD,   ///< Got a valid velocity command from the plugin.
+      ARRIVED_GOAL,    ///< The robot arrived the goal.
+      CANCELED,        ///< The controller has been canceled.
+      STOPPED,         ///< The controller has been stopped!
+      INTERNAL_ERROR,  ///< An internal error occurred.
+      ROBOT_DISABLED   ///< The robot is stuck and ignored velocity command
     };
 
     /**
@@ -217,14 +218,18 @@ namespace mbf_abstract_nav
      */
     void setVelocityCmd(const geometry_msgs::TwistStamped &vel_cmd_stamped);
 
+    /**
+     * @brief Check if the robot is ignoring the cmd_vel longer than threshold time
+     * @param cmd_vel the latest cmd_vel being published by the controller
+     * @return true if cmd_vel is being ignored by the robot longer than tolerance time, false otherwise
+     */
+    bool checkCmdVelIgnored(const geometry_msgs::Twist& cmd_vel);
+
     //! the name of the loaded plugin
     std::string plugin_name_;
 
-    //! the local planer to calculate the velocity command
+    //! The local planer to calculate the velocity command
     mbf_abstract_core::AbstractController::Ptr controller_;
-
-    //! shared pointer to the shared tf listener
-    const TFPtr &tf_listener_ptr;
 
     //! The current cycle start time of the last cycle run. Will by updated each cycle.
     ros::Time last_call_time_;
@@ -234,6 +239,9 @@ namespace mbf_abstract_nav
 
     //! The time the controller responded with a success output (output < 10).
     ros::Time last_valid_cmd_time_;
+
+    //! The time when the robot started ignoring velocity commands
+    ros::Time first_ignored_time_;
 
     //! The maximum number of retries
     int max_retries_;
@@ -274,12 +282,6 @@ namespace mbf_abstract_nav
      * @return true if the goal has been reached, false otherwise
      */
     bool reachedGoalCheck();
-
-    /**
-     * @brief Computes the robot pose;
-     * @return true if the robot pose has been computed successfully, false otherwise.
-     */
-    bool computeRobotPose();
 
     /**
      * @brief Sets the controller state. This method makes the communication of the state thread safe.
@@ -326,9 +328,6 @@ namespace mbf_abstract_nav
     //! publisher for the current velocity command
     ros::Publisher vel_pub_;
 
-    //! publisher for the current goal
-    ros::Publisher current_goal_pub_;
-
     //! the current controller state
     AbstractControllerExecution::ControllerState state_;
 
@@ -350,6 +349,10 @@ namespace mbf_abstract_nav
     //! whether move base flex should force the robot to stop on canceling navigation.
     bool force_stop_on_cancel_;
 
+    //! whether move base flex should force the robot to stop while retrying controller calls
+    //! (that is, until patience is exceeded or retries are exhausted).
+    bool force_stop_on_retry_;
+
     //! distance tolerance to the given goal pose
     double dist_tolerance_;
 
@@ -367,6 +370,10 @@ namespace mbf_abstract_nav
 
     //! replaces parameter angle_tolerance_ for the action
     double action_angle_tolerance_;
+
+    //! time tolerance for checking if the robot is ignoring cmd_vel
+    double cmd_vel_ignored_tolerance_;
+
   };
 
 } /* namespace mbf_abstract_nav */

@@ -59,18 +59,15 @@ AbstractNavigationServer::AbstractNavigationServer(const TFPtr &tf_listener_ptr)
       tf_timeout_(private_nh_.param<double>("tf_timeout", 3.0)),
       global_frame_(private_nh_.param<std::string>("global_frame", "map")),
       robot_frame_(private_nh_.param<std::string>("robot_frame", "base_link")),
-      robot_info_(*tf_listener_ptr, global_frame_, robot_frame_, tf_timeout_),
+      robot_info_(*tf_listener_ptr, global_frame_, robot_frame_, tf_timeout_,
+                  private_nh_.param<std::string>("odom_topic", "odom")),
       controller_action_(name_action_exe_path, robot_info_),
       planner_action_(name_action_get_path, robot_info_),
       recovery_action_(name_action_recovery, robot_info_),
       move_base_action_(name_action_move_base, robot_info_, recovery_plugin_manager_.getLoadedNames())
 {
-  ros::NodeHandle nh;
-
-  goal_pub_ = nh.advertise<geometry_msgs::PoseStamped>("current_goal", 1);
-
   // init cmd_vel publisher for the robot velocity
-  vel_pub_ = nh.advertise<geometry_msgs::Twist>("cmd_vel", 1);
+  vel_pub_ = ros::NodeHandle().advertise<geometry_msgs::Twist>("cmd_vel", 1);
 
   action_server_get_path_ptr_ = ActionServerGetPathPtr(
     new ActionServerGetPath(
@@ -146,7 +143,7 @@ void AbstractNavigationServer::callActionGetPath(ActionServerGetPath::GoalHandle
     mbf_msgs::GetPathResult result;
     result.outcome = mbf_msgs::GetPathResult::INVALID_PLUGIN;
     result.message = "No plugin loaded with the given name \"" + goal.planner + "\"!";
-    ROS_WARN_STREAM_NAMED("get_path", result.message);
+    ROS_ERROR_STREAM_NAMED("get_path", result.message);
     goal_handle.setRejected(result, result.message);
     return;
   }
@@ -204,7 +201,7 @@ void AbstractNavigationServer::callActionExePath(ActionServerExePath::GoalHandle
     mbf_msgs::ExePathResult result;
     result.outcome = mbf_msgs::ExePathResult::INVALID_PLUGIN;
     result.message = "No plugin loaded with the given name \"" + goal.controller + "\"!";
-    ROS_WARN_STREAM_NAMED("exe_path", result.message);
+    ROS_ERROR_STREAM_NAMED("exe_path", result.message);
     goal_handle.setRejected(result, result.message);
     return;
   }
@@ -263,7 +260,7 @@ void AbstractNavigationServer::callActionRecovery(ActionServerRecovery::GoalHand
     mbf_msgs::RecoveryResult result;
     result.outcome = mbf_msgs::RecoveryResult::INVALID_PLUGIN;
     result.message = "No plugin loaded with the given name \"" + goal.behavior + "\"!";
-    ROS_WARN_STREAM_NAMED("recovery", result.message);
+    ROS_ERROR_STREAM_NAMED("recovery", result.message);
     goal_handle.setRejected(result, result.message);
     return;
   }
@@ -313,15 +310,16 @@ mbf_abstract_nav::AbstractPlannerExecution::Ptr AbstractNavigationServer::newPla
     const std::string &plugin_name,
     const mbf_abstract_core::AbstractPlanner::Ptr &plugin_ptr)
 {
-  return boost::make_shared<mbf_abstract_nav::AbstractPlannerExecution>(plugin_name, plugin_ptr, last_config_);
+  return boost::make_shared<mbf_abstract_nav::AbstractPlannerExecution>(plugin_name, plugin_ptr,
+                                                                        robot_info_, last_config_);
 }
 
 mbf_abstract_nav::AbstractControllerExecution::Ptr AbstractNavigationServer::newControllerExecution(
     const std::string &plugin_name,
     const mbf_abstract_core::AbstractController::Ptr &plugin_ptr)
 {
-  return boost::make_shared<mbf_abstract_nav::AbstractControllerExecution>(plugin_name, plugin_ptr, vel_pub_, goal_pub_,
-                                                                           tf_listener_ptr_, last_config_);
+  return boost::make_shared<mbf_abstract_nav::AbstractControllerExecution>(plugin_name, plugin_ptr, robot_info_,
+                                                                           vel_pub_, last_config_);
 }
 
 mbf_abstract_nav::AbstractRecoveryExecution::Ptr AbstractNavigationServer::newRecoveryExecution(
@@ -329,7 +327,7 @@ mbf_abstract_nav::AbstractRecoveryExecution::Ptr AbstractNavigationServer::newRe
     const mbf_abstract_core::AbstractRecovery::Ptr &plugin_ptr)
 {
   return boost::make_shared<mbf_abstract_nav::AbstractRecoveryExecution>(plugin_name, plugin_ptr,
-                                                                         tf_listener_ptr_, last_config_);
+                                                                         robot_info_, last_config_);
 }
 
 void AbstractNavigationServer::startActionServers()
@@ -365,9 +363,9 @@ void AbstractNavigationServer::reconfigure(
     // if someone sets restore defaults on the parameter server, prevent looping
     config.restore_defaults = false;
   }
-  planner_action_.reconfigureAll(config, level);
-  controller_action_.reconfigureAll(config, level);
-  recovery_action_.reconfigureAll(config, level);
+  planner_action_.reconfigure(config, level);
+  controller_action_.reconfigure(config, level);
+  recovery_action_.reconfigure(config, level);
   move_base_action_.reconfigure(config, level);
 
   last_config_ = config;

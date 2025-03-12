@@ -42,36 +42,16 @@
 
 namespace mbf_abstract_nav
 {
+
 AbstractPlannerExecution::AbstractPlannerExecution(const std::string& name,
                                                    const mbf_abstract_core::AbstractPlanner::Ptr& planner_ptr,
+                                                   const mbf_utility::RobotInformation &robot_info,
                                                    const MoveBaseFlexConfig& config)
-  : AbstractExecutionBase(name)
+  : AbstractExecutionBase(name, robot_info)
   , planner_(planner_ptr)
   , state_(INITIALIZED)
   , max_retries_(0)
   , planning_(false)
-  , has_new_start_(false)
-  , has_new_goal_(false)
-{
-  ros::NodeHandle private_nh("~");
-
-  // non-dynamically reconfigurable parameters
-  private_nh.param("robot_frame", robot_frame_, std::string("base_footprint"));
-  private_nh.param("map_frame", global_frame_, std::string("map"));
-
-  // dynamically reconfigurable parameters
-  reconfigure(config);
-}
-
-AbstractPlannerExecution::AbstractPlannerExecution(const std::string& name,
-                                                   const mbf_abstract_core::AbstractPlanner::Ptr& planner_ptr,
-                                                   const TFPtr& tf_listener_ptr, const MoveBaseFlexConfig& config)
-  : AbstractExecutionBase(name)
-  , planner_(planner_ptr)
-  , state_(INITIALIZED)
-  , max_retries_(0)
-  , planning_(false)
-  , tf_listener_ptr_(tf_listener_ptr)
   , has_new_start_(false)
   , has_new_goal_(false)
 {
@@ -271,7 +251,7 @@ void AbstractPlannerExecution::run()
     {
       // call the planner
       std::vector<geometry_msgs::PoseStamped> plan;
-      double cost;
+      double cost = 0.0;
 
       // lock goal start mutex
       goal_start_mtx_.lock();
@@ -344,7 +324,7 @@ void AbstractPlannerExecution::run()
                                                 << (cancel_ ? "; planner canceled!" : ""));
           setState(PAT_EXCEEDED, true);
         }
-        else if (max_retries_ == 0 && patience_.isZero())
+        else if (max_retries_ == 0)
         {
           ROS_INFO_STREAM("Planning could not find a plan!");
           setState(NO_PLAN_FOUND, true);
