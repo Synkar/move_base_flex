@@ -518,6 +518,7 @@ bool MoveBaseAction::replanningActive() const
 void MoveBaseAction::replanningThread()
 {
   ros::Duration update_period(0.005);
+  ros::Rate update_rate(1.0/update_period.toSec());
   ros::Time last_replan_time = ros::Time::now();
 
   while (ros::ok() && !replanning_thread_shutdown_)
@@ -545,7 +546,7 @@ void MoveBaseAction::replanningThread()
       }
       // else keep waiting for planning to complete (we already waited update_period in waitForResult)
     }
-    else if (!replanningActive())
+    else if (!replanningActive() && ros::Time::now() - last_replan_time >= replanning_period_)
     {
       last_replan_time = ros::Time::now();
       update_period.sleep();
@@ -556,6 +557,7 @@ void MoveBaseAction::replanningThread()
       action_client_get_path_.sendGoal(get_path_goal_);
       last_replan_time = ros::Time::now();
     }
+    update_rate.sleep();
   }
 }
 
